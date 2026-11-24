@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv/
+
+# Session, secrets & cache files
+.vider_session.json
+session.json
+settings.json
+.env
+.env.*
+*.tmp
+*.temp
+*.part
+*.log
+
+# Video downloads
+*.mp4
+*.mkv
+*.avi
+*.ts
+*.webm
+*.rmvb
+*.mov
+*.flv
+downloads/
+
+# Testing & linting caches
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# IDE & OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Build & distribution
+dist/
+build/
+*.egg-info/
+*.exe
+*.spec

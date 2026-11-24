@@ -6,6 +6,8 @@
 
 Lekki, szybki i przejrzysty program z **okienkowym interfejsem graficznym (GUI)** oraz **trybem terminalowym (CLI)** do pobierania pojedynczych materiałów wideo oraz całych list (**Batch Download**) z serwisów `vider.info` oraz `vider.pl`.
 
+![Podgląd aplikacji Vider Downloader](docs/screenshot.png)
+
 ---
 
 ## Szybki start (dla każdego — bez instalacji Pythona)

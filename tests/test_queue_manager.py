@@ -101,3 +101,46 @@ class TestBatchQueueManager:
         assert qm.get_items() == []
         assert qm.get_summary()["total"] == 0
         assert DownloadStatus.PENDING.value == "pending"
+
+
+class TestConcurrencyAndCaptcha:
+    def test_parallel_downloads_respect_limit(self, tmp_path):
+        import threading
+        import time
+
+        extractor = MagicMock()
+        extractor.session = MagicMock()
+        extractor.extract.side_effect = lambda raw: _make_fake_info(raw)
+        downloader = MagicMock()
+        lock = threading.Lock()
+        state = {"now": 0, "peak": 0}
+
+        def fake_download(**kwargs):
+            with lock:
+                state["now"] += 1
+                state["peak"] = max(state["peak"], state["now"])
+            time.sleep(0.1)
+            with lock:
+                state["now"] -= 1
+            return kwargs["output_path"]
+
+        downloader.download.side_effect = fake_download
+        qm = BatchQueueManager(extractor=extractor, downloader=downloader)
+        qm.add_from_text("AAAA01 AAAA02 AAAA03 AAAA04 AAAA05 AAAA06")
+        summary = qm.run_sync(output_dir=str(tmp_path), max_concurrent=3)
+        assert summary["completed"] == 6
+        assert state["peak"] == 3
+
+    def test_invalid_captcha_flagged_on_item(self, tmp_path):
+        from vider_downloader.core import InvalidCaptchaError
+
+        extractor = MagicMock()
+        extractor.session = MagicMock()
+        extractor.extract.side_effect = InvalidCaptchaError("zły kod")
+        qm = BatchQueueManager(extractor=extractor, downloader=MagicMock())
+        qm.add_from_text("BBBB01")
+        qm.run_sync(output_dir=str(tmp_path))
+        item = qm.get_items()[0]
+        assert item.status == DownloadStatus.FAILED
+        assert item.captcha_error is True
+        assert qm.retry_item(item.uid) and item.captcha_error is False

@@ -172,6 +172,7 @@ class QueueItem:
     custom_filename: Optional[str] = None
     progress: DownloadProgress = field(default_factory=DownloadProgress)
     error: Optional[str] = None
+    captcha_error: bool = False
 
     @property
     def display_title(self) -> str:

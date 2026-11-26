@@ -6,6 +6,7 @@ import base64
 import html
 import json
 import re
+import threading
 from pathlib import Path
 from typing import Callable, List, Optional, Tuple
 from urllib.parse import urlparse
@@ -25,6 +26,10 @@ class ViderError(RuntimeError):
 
 class CaptchaRequiredError(ViderError):
     """Raised when Vider requests captcha verification and no valid solution is supplied."""
+
+
+class InvalidCaptchaError(CaptchaRequiredError):
+    """Raised when the captcha code typed by the user was rejected by Vider."""
 
 
 def decode_video_url(raw_base64: str) -> str:
@@ -157,6 +162,8 @@ class ViderExtractor:
         )
         self.session_file = Path(session_file) if session_file else get_session_file_path()
         self.captcha_handler = captcha_handler
+        # Only one captcha prompt at a time when several downloads run in parallel
+        self._captcha_lock = threading.Lock()
         self._load_session()
 
     def _load_session(self) -> None:
@@ -208,20 +215,21 @@ class ViderExtractor:
         if img_resp.status_code != 200 or not img_resp.content:
             raise CaptchaRequiredError("Nie udało się pobrać obrazka Captcha z serwisu Vider.")
 
-        code = self.captcha_handler(img_resp.content)
-        if not code or not code.strip():
-            raise CaptchaRequiredError("Anulowano rozwiązywanie kodu Captcha.")
+        with self._captcha_lock:
+            code = self.captcha_handler(img_resp.content)
+            if not code or not code.strip():
+                raise CaptchaRequiredError("Anulowano rozwiązywanie kodu Captcha.")
 
-        post_resp = self.session.post(
-            target_url,
-            data={"captcha": code.strip()},
-            headers={"Referer": target_url},
-            timeout=15,
-        )
-        self._save_session()
+            post_resp = self.session.post(
+                target_url,
+                data={"captcha": code.strip()},
+                headers={"Referer": target_url},
+                timeout=15,
+            )
+            self._save_session()
 
         if "content-404" in post_resp.text or "ca-pt-cha.png" in post_resp.text:
-            raise CaptchaRequiredError("Podany kod Captcha jest nieprawidłowy. Spróbuj ponownie.")
+            raise InvalidCaptchaError("Podany kod Captcha jest nieprawidłowy. Spróbuj ponownie.")
 
         return True
 

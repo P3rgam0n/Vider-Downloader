@@ -7,7 +7,7 @@ import uuid
 from pathlib import Path
 from typing import Callable, Dict, List, Optional, Tuple
 
-from vider_downloader.core import ViderExtractor, parse_urls_from_text
+from vider_downloader.core import InvalidCaptchaError, ViderExtractor, parse_urls_from_text
 from vider_downloader.downloader import (
     DownloadCancelled,
     Downloader,
@@ -119,6 +119,7 @@ class BatchQueueManager:
             if item.status in (DownloadStatus.FAILED, DownloadStatus.CANCELLED):
                 item.status = DownloadStatus.PENDING
                 item.error = None
+                item.captcha_error = False
                 item.progress = DownloadProgress()
                 return True
             return False
@@ -131,6 +132,7 @@ class BatchQueueManager:
                 if item.status in (DownloadStatus.FAILED, DownloadStatus.CANCELLED):
                     item.status = DownloadStatus.PENDING
                     item.error = None
+                    item.captcha_error = False
                     item.progress = DownloadProgress()
                     count += 1
         return count
@@ -170,6 +172,7 @@ class BatchQueueManager:
         info_only: bool = False,
         on_item_update: Optional[ItemCallback] = None,
         on_queue_finished: Optional[QueueFinishedCallback] = None,
+        max_concurrent: int = 1,
     ) -> threading.Thread:
         """Starts processing pending items in a background daemon thread."""
         with self._lock:
@@ -186,6 +189,7 @@ class BatchQueueManager:
                     "info_only": info_only,
                     "on_item_update": on_item_update,
                     "on_queue_finished": on_queue_finished,
+                    "max_concurrent": max_concurrent,
                 },
                 daemon=True,
                 name="vider-batch-worker",
@@ -201,38 +205,50 @@ class BatchQueueManager:
         info_only: bool = False,
         on_item_update: Optional[ItemCallback] = None,
         on_queue_finished: Optional[QueueFinishedCallback] = None,
+        max_concurrent: int = 1,
     ) -> Dict[str, int]:
-        """Synchronously processes all pending queue items in order."""
+        """Synchronously processes pending items using up to `max_concurrent` parallel workers."""
         self._cancel_event.clear()
+        workers_count = max(1, int(max_concurrent))
 
-        while True:
-            item = self._next_pending_item()
-            if item is None:
-                break
+        def worker() -> None:
+            while True:
+                item = self._claim_next_pending_item()
+                if item is None:
+                    return
+                if self._cancel_event.is_set():
+                    item.status = DownloadStatus.CANCELLED
+                    item.error = "Zatrzymano kolejkę."
+                    self._notify(on_item_update, item)
+                    return
+                self._process_single_item(
+                    item=item,
+                    output_dir=output_dir,
+                    overwrite=overwrite,
+                    info_only=info_only,
+                    on_item_update=on_item_update,
+                )
 
-            if self._cancel_event.is_set():
-                item.status = DownloadStatus.CANCELLED
-                item.error = "Zatrzymano kolejkę."
-                self._notify(on_item_update, item)
-                break
-
-            self._process_single_item(
-                item=item,
-                output_dir=output_dir,
-                overwrite=overwrite,
-                info_only=info_only,
-                on_item_update=on_item_update,
-            )
+        threads = [
+            threading.Thread(target=worker, daemon=True, name=f"vider-dl-{i}")
+            for i in range(workers_count)
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join()
 
         summary = self.get_summary()
         if on_queue_finished is not None:
             on_queue_finished(summary)
         return summary
 
-    def _next_pending_item(self) -> Optional[QueueItem]:
+    def _claim_next_pending_item(self) -> Optional[QueueItem]:
+        """Atomically picks the next PENDING item and marks it RESOLVING."""
         with self._lock:
             for item in self._items:
                 if item.status == DownloadStatus.PENDING:
+                    item.status = DownloadStatus.RESOLVING
                     return item
             return None
 
@@ -291,6 +307,7 @@ class BatchQueueManager:
         except Exception as exc:
             item.status = DownloadStatus.FAILED
             item.error = str(exc)
+            item.captcha_error = isinstance(exc, InvalidCaptchaError)
             self._notify(on_item_update, item)
 
     @staticmethod

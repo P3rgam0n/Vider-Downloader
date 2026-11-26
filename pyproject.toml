@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "vider-downloader"
-version = "1.0.0"
+version = "1.1.0"
 description = "Lightweight desktop GUI and CLI batch video downloader for vider.info / vider.pl"
 readme = "README.md"
 license = { text = "MIT" }

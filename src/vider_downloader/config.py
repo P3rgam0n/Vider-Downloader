@@ -58,10 +58,11 @@ class AppSettings:
 
     output_dir: str
     overwrite: bool = False
+    max_concurrent: int = 1
 
     @classmethod
     def default(cls) -> "AppSettings":
-        return cls(output_dir=str(get_default_download_dir()), overwrite=False)
+        return cls(output_dir=str(get_default_download_dir()), overwrite=False, max_concurrent=1)
 
 
 def load_settings(settings_path: Optional[Path] = None) -> AppSettings:
@@ -74,7 +75,12 @@ def load_settings(settings_path: Optional[Path] = None) -> AppSettings:
         data = json.loads(path.read_text(encoding="utf-8"))
         output_dir = str(data.get("output_dir") or defaults.output_dir)
         overwrite = bool(data.get("overwrite", defaults.overwrite))
-        return AppSettings(output_dir=output_dir, overwrite=overwrite)
+        try:
+            max_concurrent = int(data.get("max_concurrent", defaults.max_concurrent))
+        except (TypeError, ValueError):
+            max_concurrent = defaults.max_concurrent
+        max_concurrent = max(1, min(10, max_concurrent))
+        return AppSettings(output_dir=output_dir, overwrite=overwrite, max_concurrent=max_concurrent)
     except Exception:
         return defaults
 

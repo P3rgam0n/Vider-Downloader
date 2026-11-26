@@ -137,6 +137,8 @@ class QueueRowWidget(ctk.CTkFrame):
 
     def update_from_item(self, item: QueueItem) -> None:
         label_text, badge_bg, badge_fg = theme.STATUS_STYLES[item.status]
+        if item.status == DownloadStatus.FAILED and item.captcha_error:
+            label_text = "Błędna captcha"
         self._status_badge.configure(text=label_text, fg_color=badge_bg, text_color=badge_fg)
 
         title = item.display_title
@@ -170,7 +172,8 @@ class QueueRowWidget(ctk.CTkFrame):
 
         # Meta info line
         if item.status == DownloadStatus.FAILED and item.error:
-            self._meta_label.configure(text=f"Błąd: {item.error}", text_color=theme.DANGER)
+            prefix = "Błędna captcha" if item.captcha_error else "Błąd"
+            self._meta_label.configure(text=f"{prefix}: {item.error}", text_color=theme.DANGER)
         elif item.status == DownloadStatus.CANCELLED:
             self._meta_label.configure(
                 text="Zatrzymano — możesz wznowić od miejsca przerwania (.part).",
@@ -439,6 +442,25 @@ class ViderApp(ctk.CTk):
             command=self._persist_settings,
         ).pack(side="left")
 
+        ctk.CTkLabel(
+            out_row,
+            text="Równoległe pobierania:",
+            font=ctk.CTkFont(size=12),
+            text_color=theme.TEXT_SECONDARY,
+        ).pack(side="left", padx=(14, 6))
+        self._concurrent_var = ctk.StringVar(value=str(self._settings.max_concurrent))
+        ctk.CTkOptionMenu(
+            out_row,
+            values=[str(i) for i in range(1, 11)],
+            variable=self._concurrent_var,
+            width=64,
+            height=28,
+            fg_color=theme.BG_INPUT,
+            button_color=theme.BG_BUTTON_MUTED_HOVER,
+            text_color=theme.TEXT_PRIMARY,
+            command=lambda _v: self._persist_settings(),
+        ).pack(side="left")
+
         # 4. Queue Card
         queue_card = ctk.CTkFrame(
             root,
@@ -643,8 +665,15 @@ class ViderApp(ctk.CTk):
         self._settings = AppSettings(
             output_dir=self._output_var.get().strip() or self._settings.output_dir,
             overwrite=bool(self._overwrite_var.get()),
+            max_concurrent=self._get_max_concurrent(),
         )
         save_settings(self._settings)
+
+    def _get_max_concurrent(self) -> int:
+        try:
+            return max(1, min(10, int(self._concurrent_var.get())))
+        except (TypeError, ValueError):
+            return self._settings.max_concurrent
 
     # ------------------------------------------------------------------
     # Queue Management & Rendering
@@ -750,6 +779,7 @@ class ViderApp(ctk.CTk):
             overwrite=bool(self._overwrite_var.get()),
             on_item_update=self._schedule_item_update,
             on_queue_finished=self._schedule_queue_finished,
+            max_concurrent=self._get_max_concurrent(),
         )
 
     def _schedule_item_update(self, item: QueueItem) -> None:
